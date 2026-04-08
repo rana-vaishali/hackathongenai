@@ -1,0 +1,127 @@
+sources:
+  dependency-db:
+    kind: "alloydb-postgres"
+    project: "${PROJECT_ID}"
+    region: "${REGION}"
+    cluster: "dependency-cluster"
+    instance: "dependency-instance"
+    database: "dependency_copilot"
+    user: "${DB_USER}"
+    password: "${DB_PASS}"
+
+tools:
+  get_project_snapshot:
+    kind: postgres-sql
+    source: dependency-db
+    description: Get the current task snapshot for a project.
+    parameters:
+      - name: project_id
+        type: integer
+        description: The id of the project.
+    statement: |
+      SELECT id, title, owner, status, priority, due_date
+      FROM tasks
+      WHERE project_id = $1
+      ORDER BY id;
+
+  get_blocked_tasks:
+    kind: postgres-sql
+    source: dependency-db
+    description: Get blocked tasks and what they depend on for a project.
+    parameters:
+      - name: project_id
+        type: integer
+        description: The id of the project.
+    statement: |
+      SELECT t.id, t.title, d.depends_on_task_id
+      FROM tasks t
+      JOIN task_dependencies d ON t.id = d.task_id
+      WHERE t.project_id = $1 AND t.status != 'done'
+      ORDER BY t.id;
+
+  get_blocker_notes:
+    kind: postgres-sql
+    source: dependency-db
+    description: Get blocker notes for tasks in a project.
+    parameters:
+      - name: project_id
+        type: integer
+        description: The id of the project.
+    statement: |
+      SELECT t.id, t.title, b.note, b.severity
+      FROM blocker_notes b
+      JOIN tasks t ON t.id = b.task_id
+      WHERE t.project_id = $1
+      ORDER BY b.id DESC;
+
+  get_dependency_chain:
+    kind: postgres-sql
+    source: dependency-db
+    description: Get task dependency links for a project.
+    parameters:
+      - name: project_id
+        type: integer
+        description: The id of the project.
+    statement: |
+      SELECT t.id AS task_id, t.title AS task_title, d.depends_on_task_id
+      FROM tasks t
+      JOIN task_dependencies d ON t.id = d.task_id
+      WHERE t.project_id = $1
+      ORDER BY t.id;
+
+  create_followup_task:
+    kind: postgres-sql
+    source: dependency-db
+    description: Create a follow-up task for a project.
+    parameters:
+      - name: project_id
+        type: integer
+        description: The id of the project.
+      - name: title
+        type: string
+        description: Title of the follow-up task.
+      - name: owner
+        type: string
+        description: Owner of the task.
+      - name: priority
+        type: string
+        description: Priority of the task.
+    statement: |
+      INSERT INTO tasks (project_id, title, owner, status, priority)
+      VALUES ($1, $2, $3, 'open', $4)
+      RETURNING id;
+
+  create_checkpoint_event:
+    kind: postgres-sql
+    source: dependency-db
+    description: Create a checkpoint event for a project.
+    parameters:
+      - name: project_id
+        type: integer
+        description: The id of the project.
+      - name: title
+        type: string
+        description: Title of the checkpoint.
+      - name: scheduled_at
+        type: string
+        description: Timestamp for the checkpoint.
+    statement: |
+      INSERT INTO followups (project_id, title, scheduled_at, status)
+      VALUES ($1, $2, CAST($3 AS timestamp), 'scheduled')
+      RETURNING id;
+
+  save_action_summary:
+    kind: postgres-sql
+    source: dependency-db
+    description: Save an action summary for a project.
+    parameters:
+      - name: project_id
+        type: integer
+        description: The id of the project.
+      - name: summary
+        type: string
+        description: The summary text.
+    statement: |
+      INSERT INTO action_summaries (project_id, summary)
+      VALUES ($1, $2)
+      RETURNING id;
